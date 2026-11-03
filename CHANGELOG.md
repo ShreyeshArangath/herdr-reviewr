@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Add explicit Ctrl+S review preview and submission to an idle agent in the reviewed worktree, with stale-review and uncertain-delivery guards.
+- Accept initial scope, editable base, and agent context from CLI arguments or launcher environment.
+
 ## [0.49.0] — 2026-10-29
 
 ### Added

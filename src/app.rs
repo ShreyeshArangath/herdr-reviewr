@@ -665,6 +665,7 @@ struct LastClick {
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug)]
 pub struct App {
+    pub run_review: crate::run_review::RunReview,
     pub repo: PathBuf,
     pub base: Option<String>,
     /// The `branch` scope's base, from the latest landed snapshot.
@@ -920,6 +921,7 @@ impl App {
         let last_turn = baseline.map_or(crate::turn::LastTurn::Waiting, crate::turn::LastTurn::At);
         let theme = theme::resolve(None);
         Self {
+            run_review: crate::run_review::RunReview::default(),
             home: repo.clone(),
             repo,
             base,
@@ -1138,6 +1140,7 @@ impl App {
     /// Carry the review into a recovered app: comments, and a draft with its frozen diff.
     pub(crate) fn carry_authored_state_from(&mut self, old: &mut Self) {
         self.store = std::mem::take(&mut old.store);
+        self.run_review = std::mem::take(&mut old.run_review);
         self.list_cursor = old.list_cursor;
         self.carry_pane_from(old);
         // Session memory, like the comments.
@@ -3566,8 +3569,36 @@ impl App {
             self.input.clear();
             self.caret = 0;
             self.resume_list = false; // a fresh diff comment returns to the diff, not the list
+            self.run_review.draft_revision = self.authored_revision().ok();
             self.mode = Mode::Composing { editing: None };
         }
+    }
+
+    fn authored_revision(&self) -> Result<crate::run_review::Revision> {
+        let path = self.diff_path.as_deref().ok_or_else(|| anyhow::anyhow!("no open diff"))?;
+        let revision = crate::run_review::Revision::capture(self, path)?;
+        if revision.ends != self.changeset.ends {
+            anyhow::bail!("displayed revision changed before comment");
+        }
+        let fresh = if self.diff.view == View::Diff {
+            let (old, new) =
+                self.content_sides(path).map_err(|_| anyhow::anyhow!("cannot read diff"))?;
+            FileDiff::build(
+                path.to_owned(),
+                self.rename_source(path),
+                &old,
+                &new,
+                &self.highlighter,
+            )
+        } else {
+            let content = worktree_content(&self.repo, path)
+                .map_err(|_| anyhow::anyhow!("cannot read file"))?;
+            crate::diff::DiffCache::new().get_file(path.to_owned(), &content, &self.highlighter)
+        };
+        if fresh.rows != self.diff.rows || fresh.notice != self.diff.notice {
+            anyhow::bail!("displayed diff changed before comment");
+        }
+        Ok(revision)
     }
 
     /// `edit`: the comment under the cursor, else the file it names.
@@ -3940,6 +3971,11 @@ impl App {
                 if let Some(c) = self.build_comment(text) {
                     logln!("comment add {} :: {}", c.location(), c.text);
                     let i = self.store.add(c);
+                    if let Some(id) = self.store.id(i)
+                        && let Some(revision) = self.run_review.draft_revision.take()
+                    {
+                        self.run_review.record(id, revision);
+                    }
                     self.target_comment_card(i);
                     self.status = "comment added".to_string();
                 }
@@ -3951,7 +3987,8 @@ impl App {
     }
 
     /// Re-derive the rendered rows now after a comment change, not on a later refresh.
-    fn refresh_rendered(&mut self) {
+    pub(crate) fn refresh_rendered(&mut self) {
+        self.run_review.retain(&self.store);
         if self.rendered.on_screen() {
             self.rebuild_visible();
             self.settle_read();

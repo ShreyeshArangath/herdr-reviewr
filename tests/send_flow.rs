@@ -44,6 +44,7 @@ fn worktree_line(app: &App) -> String {
 enum Reply {
     /// herdr's success reply.
     Result,
+    Prompt,
     /// herdr's error reply for a pane that closed after it was resolved.
     PaneGone,
     /// herdr's error reply for a failure of its own, the pane still there.
@@ -116,6 +117,9 @@ fn answer_each<S: Read + Write>(
         socket.requests.lock().unwrap().push(request);
         let answer = match *socket.reply.lock().unwrap() {
             Reply::Result => serde_json::json!({"id": id, "result": {"type": "ok"}}),
+            Reply::Prompt => {
+                serde_json::json!({"id": id, "result": {"type": "agent_prompted", "agent":{"pane_id":"w8:p1"}}})
+            }
             Reply::PaneGone => serde_json::json!({"id": id, "error": {
                 "code": "pane_not_found", "message": "pane w8:p1 not found",
             }}),
@@ -487,4 +491,84 @@ fn a_send_without_a_socket_refuses_as_herdr_not_answering() {
     press(&mut app, KeyCode::Char('s'), area, &keymap);
     assert_eq!(app.status, "herdr didn't answer, press y to copy");
     assert_eq!(app.store.len(), 1, "a refusal keeps every comment");
+}
+
+fn run_agents(dir: &Path, app: &App, revision: u64) {
+    agents(
+        dir,
+        &serde_json::json!({"result":{"agents":[{
+            "agent":"codex", "agent_status":"idle", "pane_id":"w8:p1",
+            "terminal_id":"term1", "revision":revision, "agent_session":{"value":"session1"},
+            "cwd":app.repo, "foreground_cwd":app.repo
+        }]}})
+        .to_string(),
+    );
+}
+
+#[test]
+fn explicit_run_previews_then_submits_once_and_retains_uncertain_reviews() {
+    if !in_child() {
+        run_in_child("explicit_run_previews_then_submits_once_and_retains_uncertain_reviews", true);
+        return;
+    }
+    let dir = fixture_dir();
+    let socket = FakeSocket::serve(&socket_path());
+    let (_repo, mut app) = app();
+    run_agents(&dir, &app, 1);
+    write_comment(&mut app, "fix this");
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
+        Rect::new(0, 0, 80, 24),
+        &Keymap::default(),
+    )
+    .unwrap();
+    assert!(app.run_review.is_open());
+    assert_eq!(socket.requests().len(), 0, "preview never sends");
+    socket.reply(Reply::Prompt);
+    app.confirm_run_review();
+    assert_eq!(app.store.len(), 0);
+    let requests = socket.requests();
+    assert_eq!(requests.len(), 1);
+    let request: serde_json::Value = serde_json::from_str(&requests[0]).unwrap();
+    assert_eq!(request["method"], "agent.prompt");
+    assert_eq!(request["params"]["target"], "w8:p1");
+    assert!(request["params"]["text"].as_str().unwrap().contains("Scope: uncommitted"));
+    assert!(request["params"]["text"].as_str().unwrap().contains("a.rs:2"));
+    write_comment(&mut app, "second review");
+    app.prepare_run_review();
+    socket.reply(Reply::Drop);
+    app.confirm_run_review();
+    assert_eq!(app.store.len(), 1);
+    assert!(app.status.contains("delivery uncertain"));
+    app.prepare_run_review();
+    assert!(!app.run_review.is_open());
+    assert_eq!(socket.requests().len(), 2, "uncertain delivery is never retried");
+}
+
+#[test]
+fn explicit_run_rechecks_occupant_and_content_after_preview() {
+    if !in_child() {
+        run_in_child("explicit_run_rechecks_occupant_and_content_after_preview", true);
+        return;
+    }
+    let dir = fixture_dir();
+    let socket = FakeSocket::serve(&socket_path());
+    let (repo, mut app) = app();
+    run_agents(&dir, &app, 1);
+    write_comment(&mut app, "fix this");
+    app.prepare_run_review();
+    assert!(app.run_review.is_open());
+    run_agents(&dir, &app, 2);
+    app.confirm_run_review();
+    assert_eq!(socket.requests().len(), 0);
+    assert_eq!(app.store.len(), 1);
+    assert!(app.status.contains("agent changed"));
+    app.prepare_run_review();
+    assert!(app.run_review.is_open());
+    repo.write("a.rs", "changed under preview\n");
+    app.confirm_run_review();
+    assert_eq!(socket.requests().len(), 0);
+    assert_eq!(app.store.len(), 1);
+    assert!(app.status.contains("stale review"));
 }

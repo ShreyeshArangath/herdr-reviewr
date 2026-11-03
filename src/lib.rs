@@ -25,6 +25,7 @@ pub mod model;
 pub mod proc;
 pub(crate) mod rendered;
 pub mod roles;
+pub mod run_review;
 pub mod schedule;
 pub mod search;
 pub mod selection;
@@ -74,7 +75,17 @@ pub fn run() -> Result<()> {
     // herdr holds it at most 2s, then the defaults paint (issue #4).
     cfg.plugin_config_dir = config::resolve_config_dir(herdr::plugin_config_dir);
     let initial_config = config::plugin_config(cfg.plugin_config_dir.as_deref());
+    let launch_error = if initial_config.is_ok() && cfg.base.is_none() {
+        cfg.initial_base
+            .as_deref()
+            .and_then(|base| git::write_base_pick(&repo_root(&cfg), base).err())
+    } else {
+        None
+    };
     let mut app = app_for(&cfg, &initial_config);
+    if let Some(error) = launch_error {
+        app.status = format!("initial base failed: {error}");
+    }
 
     let mut screen = Screen::claim();
     // A cosmetic label, stamped on its own thread; identity is the process.
@@ -284,9 +295,10 @@ fn app_for(cfg: &Config, initial_config: &Result<PluginConfig, config::PluginCon
 /// Build a fresh working reviewr pane only after the plugin configuration has validated.
 fn ready_app(cfg: &Config, plugin_config: PluginConfig) -> App {
     let repo = repo_root(cfg);
-    let scope = plugin_config.default_scope();
+    let scope = cfg.scope.unwrap_or_else(|| plugin_config.default_scope());
     logln!("start repo={} base={:?} scope={}", repo.display(), cfg.base, scope.name());
     let mut app = App::new(repo, scope, cfg.base.clone());
+    app.run_review.preferred_agent.clone_from(&cfg.agent_pane);
     app.seed_from_config(&plugin_config);
     app.set_plugin_config(plugin_config);
     app.set_cli_theme(cfg.theme.clone());
@@ -299,6 +311,8 @@ fn ready_app(cfg: &Config, plugin_config: PluginConfig) -> App {
 /// `old` restarted unloaded on the pick it asked for, `cfg` pointed there; `None` when it asked none.
 pub fn switched_app(cfg: &mut Config, old: &mut App) -> Option<App> {
     cfg.repo = old.switch_to.take()?;
+    cfg.initial_base = None;
+    cfg.agent_pane = None;
     let plugin_config = config::plugin_config(cfg.plugin_config_dir.as_deref());
     let mut app = app_for(cfg, &plugin_config);
     app.carry_view_from(old);
@@ -1728,6 +1742,19 @@ fn dispatch_key(app: &mut App, key: KeyEvent, area: Rect, keymap: &Keymap) -> Re
     // Any keypress is the user doing something else: the settled highlight clears
     app.clear_settled_selection();
 
+    if app.run_review.is_open() {
+        match key.code {
+            Esc => app.run_review.close(),
+            Up => app.run_review.move_target(-1),
+            Down => app.run_review.move_target(1),
+            PageUp => app.run_review.scroll(-10),
+            PageDown => app.run_review.scroll(10),
+            Enter if key.modifiers.is_empty() => app.confirm_run_review(),
+            _ => {}
+        }
+        return Ok(());
+    }
+
     if app.composing() {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let alt_or_shift = key.modifiers.intersects(KeyModifiers::ALT | KeyModifiers::SHIFT);
@@ -1938,6 +1965,7 @@ fn dispatch_key(app: &mut App, key: KeyEvent, area: Rect, keymap: &Keymap) -> Re
             (Some(K::Down), _) => app.list_move(1),
             (Some(K::Up), _) => app.list_move(-1),
             (Some(K::Send), _) => app.send_to_agent(),
+            (Some(K::SendRun), _) => app.prepare_run_review(),
             (Some(K::Copy), _) => {
                 app.export(&Clipboard);
             }
@@ -1997,6 +2025,7 @@ fn dispatch_key(app: &mut App, key: KeyEvent, area: Rect, keymap: &Keymap) -> Re
             K::Edit => app.start_edit(),
             K::Delete if app.focus == Focus::Diff => app.delete_comment(),
             K::Send => app.send_to_agent(),
+            K::SendRun => app.prepare_run_review(),
             K::Copy => {
                 app.export(&Clipboard);
             }
@@ -2415,6 +2444,10 @@ pub fn handle_mouse(
     keymap: &Keymap,
     target: &dyn crate::export::ExportTarget,
 ) -> Result<()> {
+    if app.run_review.is_open() {
+        return Ok(());
+    }
+
     let done = dispatch_mouse(app, m, area, heights, keymap, target);
     app.settle_input();
     done

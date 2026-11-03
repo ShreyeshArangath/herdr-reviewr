@@ -1246,3 +1246,122 @@ mod tests {
         assert_eq!(parse_agents(labelled).unwrap()[0].row_state(), "Compacting");
     }
 }
+
+/// A confirmed submission target, including the occupant behind its pane handle.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct RunAgent {
+    pub pane_id: String,
+    pub agent: String,
+    pub agent_status: String,
+    pub terminal_id: String,
+    pub revision: u64,
+    pub agent_session: Option<serde_json::Value>,
+    pub cwd: Option<String>,
+    pub foreground_cwd: Option<String>,
+    pub interactive_ready: Option<bool>,
+    pub name: Option<String>,
+}
+
+impl RunAgent {
+    pub fn label(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.agent)
+    }
+
+    fn ready_in(&self, repo: &std::path::Path) -> bool {
+        matches!(self.agent_status.as_str(), "idle" | "done")
+            && self.interactive_ready != Some(false)
+            && self
+                .foreground_cwd
+                .as_deref()
+                .or(self.cwd.as_deref())
+                .and_then(|cwd| crate::git::toplevel(std::path::Path::new(cwd)))
+                .is_some_and(|path| crate::git::canonical(&path) == crate::git::canonical(repo))
+    }
+
+    pub fn candidates(repo: &std::path::Path) -> anyhow::Result<Vec<Self>> {
+        let value: serde_json::Value = serde_json::from_str(&call(&["agent", "list"])?)?;
+        let agents = value
+            .pointer("/result/agents")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow::anyhow!("herdr returned no agent list"))?;
+        agents
+            .iter()
+            .filter(|v| v.get("agent").is_some_and(serde_json::Value::is_string))
+            .map(|v| serde_json::from_value::<Self>(v.clone()))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|rows| rows.into_iter().filter(|row| row.ready_in(repo)).collect())
+            .map_err(Into::into)
+    }
+
+    /// Re-read occupant and readiness before submission; Herdr cannot condition on that identity.
+    pub fn submit(&self, repo: &std::path::Path, text: &str) -> Result<(), RunFailure> {
+        let rows = Self::candidates(repo).map_err(|e| RunFailure::NotSent(e.to_string()))?;
+        if !rows.iter().any(|row| row == self) {
+            return Err(RunFailure::NotSent(
+                "agent changed or is no longer idle in this worktree".into(),
+            ));
+        }
+        let socket = var_os("HERDR_SOCKET_PATH")
+            .ok_or_else(|| RunFailure::NotSent("no Herdr socket".into()))?;
+        let request = serde_json::json!({"id":"reviewr:run", "method":"agent.prompt", "params":{"target":self.pane_id,"text":text}}).to_string();
+        if request.len() > MAX_REQUEST_BYTES {
+            return Err(RunFailure::NotSent("review is too large".into()));
+        }
+        let reply =
+            socket_exchange(socket, request, SEND_BOUND).map_err(|_| RunFailure::Uncertain)?;
+        let result: serde_json::Value =
+            serde_json::from_str(&reply).map_err(|_| RunFailure::Uncertain)?;
+        if result.pointer("/result/type").and_then(serde_json::Value::as_str)
+            == Some("agent_prompted")
+            && result.pointer("/result/agent/pane_id").and_then(serde_json::Value::as_str)
+                == Some(self.pane_id.as_str())
+        {
+            Ok(())
+        } else {
+            Err(RunFailure::Uncertain)
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum RunFailure {
+    NotSent(String),
+    Uncertain,
+}
+
+#[cfg(test)]
+mod run_tests {
+    use super::*;
+
+    #[test]
+    fn run_targets_require_resting_status_and_the_exact_worktree() {
+        let (dir, git) = crate::test_support::test_repo();
+        std::fs::write(dir.path().join("a"), "a").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "initial"]);
+        let other = dir.path().join("other");
+        git(&["worktree", "add", "-qb", "other", other.to_str().unwrap()]);
+        let mut agent = RunAgent {
+            pane_id: "w1:p1".into(),
+            agent: "codex".into(),
+            agent_status: "idle".into(),
+            terminal_id: "term1".into(),
+            revision: 1,
+            agent_session: None,
+            cwd: Some(dir.path().display().to_string()),
+            foreground_cwd: None,
+            interactive_ready: None,
+            name: None,
+        };
+        assert!(agent.ready_in(dir.path()));
+        for status in ["working", "blocked", "unknown"] {
+            agent.agent_status = status.into();
+            assert!(!agent.ready_in(dir.path()));
+        }
+        agent.agent_status = "done".into();
+        assert!(agent.ready_in(dir.path()));
+        agent.foreground_cwd = Some(other.display().to_string());
+        assert!(!agent.ready_in(dir.path()));
+        assert!(agent.ready_in(&other));
+    }
+}

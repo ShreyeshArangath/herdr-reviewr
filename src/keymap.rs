@@ -46,6 +46,7 @@ pub enum Action {
     GotoLine,
     Keys,
     Send,
+    SendRun,
     Copy,
     OpenPr,
     Refresh,
@@ -153,7 +154,7 @@ impl Key {
 }
 
 /// Every action with its config name and default keys, the one table the keymap derives from.
-const ACTIONS: [(Action, &str, &[Key]); 46] = [
+const ACTIONS: [(Action, &str, &[Key]); 47] = [
     (Action::Down, "down", &[Key::plain('j'), Key::named(KeyCode::Down)]),
     (Action::Up, "up", &[Key::plain('k'), Key::named(KeyCode::Up)]),
     (Action::NextHunk, "next-hunk", &[Key::plain(']')]),
@@ -195,6 +196,7 @@ const ACTIONS: [(Action, &str, &[Key]); 46] = [
     (Action::GotoLine, "goto-line", &[Key::plain(':')]),
     (Action::Keys, "keys", &[Key::plain('?')]),
     (Action::Send, "send", &[Key::plain('s'), Key::plain('S')]),
+    (Action::SendRun, "send-run", &[Key::ctrl('s')]),
     (Action::Copy, "copy", &[Key::plain('y'), Key::plain('Y')]),
     (Action::OpenPr, "open-pr", &[Key::plain('o')]),
     (Action::Refresh, "refresh", &[Key::plain('r')]),

@@ -40,6 +40,31 @@ comment on lines, and send the comments back.
 
 reviewr never edits your files, never sends on its own, and never posts to your PR.
 
+## Submit a review for the agent to run
+
+Press `Ctrl+S` to preview your comments and select an idle agent in the same worktree.
+Press `Enter` to submit the batch, or `Esc` to cancel. Any existing draft in the
+agent input is included when Herdr submits. Ordinary `s` still pastes without submitting.
+
+Send and run refuses stale comments. Refresh, review the current code, and recreate
+a stale comment before submitting. If delivery is uncertain, the comments stay in
+reviewr and repeat submission is disabled for that pane. Inspect the agent before
+starting another review. Comments remain local and are never posted to GitHub.
+
+Herdr rechecks the selected agent immediately before submission. Its prompt API
+has no expected-occupant precondition, so an agent replaced during that final
+request can still receive the prompt.
+
+A launcher can select the initial review context:
+
+```sh
+herdr-reviewr /absolute/worktree --scope branch --initial-base origin/main --agent-pane w1:p3
+```
+
+`HERDR_REVIEWR_SCOPE`, `HERDR_REVIEWR_INITIAL_BASE`, and `HERDR_REVIEWR_AGENT_PANE`
+provide the same defaults when a plugin launches reviewr. Explicit CLI arguments
+win. The initial base remains changeable with `B`; existing `--base` stays pinned.
+
 ## Requirements
 
 - **herdr ≥ 0.9.3** and **git**.

@@ -11,6 +11,9 @@ const POLL_REMOVED: &str =
 /// Resolved runtime configuration.
 #[derive(Clone, Debug)]
 pub struct Config {
+    pub scope: Option<crate::model::Scope>,
+    pub initial_base: Option<String>,
+    pub agent_pane: Option<String>,
     pub repo: PathBuf,
     pub base: Option<String>,
     pub theme: Option<String>,
@@ -31,10 +34,16 @@ impl Config {
         let mut theme: Option<String> = None;
         let mut wrap: Option<bool> = None;
         let mut removed_flag = None;
+        let mut scope = None;
+        let mut initial_base = None;
+        let mut agent_pane = None;
         let mut it = args.into_iter();
         while let Some(arg) = it.next() {
             match arg.as_str() {
                 "--base" => base = it.next(),
+                "--scope" => scope = it.next().and_then(|s| launch_scope(&s)),
+                "--initial-base" => initial_base = it.next(),
+                "--agent-pane" => agent_pane = it.next(),
                 // Removed, but its value is still no repo path.
                 "--poll" => {
                     drop(it.next());
@@ -51,12 +60,40 @@ impl Config {
         }
         let repo =
             repo.or_else(|| std::env::current_dir().ok()).unwrap_or_else(|| PathBuf::from("."));
-        Self { repo, base, theme, wrap, plugin_config_dir: None, removed_flag }
+        Self {
+            repo,
+            base,
+            theme,
+            wrap,
+            plugin_config_dir: None,
+            removed_flag,
+            scope,
+            initial_base,
+            agent_pane,
+        }
     }
 
     /// Parse from the real process arguments.
     pub fn from_env() -> Self {
-        Self::parse(std::env::args().skip(1))
+        let mut config = Self::parse(std::env::args().skip(1));
+        config.apply_launch_defaults(crate::herdr::var);
+        config
+    }
+    fn apply_launch_defaults(&mut self, get: impl Fn(&str) -> Option<String>) {
+        self.scope =
+            self.scope.or_else(|| get("HERDR_REVIEWR_SCOPE").and_then(|s| launch_scope(&s)));
+        self.initial_base = self.initial_base.take().or_else(|| get("HERDR_REVIEWR_INITIAL_BASE"));
+        self.agent_pane = self.agent_pane.take().or_else(|| get("HERDR_REVIEWR_AGENT_PANE"));
+    }
+}
+
+fn launch_scope(value: &str) -> Option<crate::model::Scope> {
+    use crate::model::Scope;
+    match value {
+        "branch" => Some(Scope::Branch),
+        "uncommitted" => Some(Scope::Uncommitted),
+        "last-turn" => Some(Scope::LastTurn),
+        _ => None,
     }
 }
 
@@ -711,6 +748,40 @@ mod tests {
     };
     use crate::keymap::KeyCode;
     use crate::model::Scope;
+
+    #[test]
+    fn launch_defaults_preserve_explicit_cli_choices() {
+        let mut config = Config::parse(
+            [
+                "/tmp/work",
+                "--scope",
+                "branch",
+                "--initial-base",
+                "origin/dev",
+                "--agent-pane",
+                "w1:p3",
+            ]
+            .map(str::to_string),
+        );
+        config.apply_launch_defaults(|_| Some("wrong".into()));
+        assert_eq!(config.scope, Some(crate::model::Scope::Branch));
+        assert_eq!(config.initial_base.as_deref(), Some("origin/dev"));
+        assert_eq!(config.agent_pane.as_deref(), Some("w1:p3"));
+        let mut config = Config::parse(Vec::<String>::new());
+        config.apply_launch_defaults(|name| {
+            Some(
+                match name {
+                    "HERDR_REVIEWR_SCOPE" => "branch",
+                    "HERDR_REVIEWR_INITIAL_BASE" => "origin/main",
+                    _ => "w1:p2",
+                }
+                .into(),
+            )
+        });
+        assert_eq!(config.scope, Some(crate::model::Scope::Branch));
+        assert_eq!(config.initial_base.as_deref(), Some("origin/main"));
+        assert_eq!(config.agent_pane.as_deref(), Some("w1:p2"));
+    }
 
     fn parse(args: &[&str]) -> Config {
         Config::parse(args.iter().map(|s| (*s).to_string()))

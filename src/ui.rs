@@ -107,6 +107,11 @@ pub fn render(frame: &mut Frame, app: &App) {
     // One footer band on every tab, drawn after the per-tab base so it sits on both layouts.
     render_footer(frame, app, p.status);
 
+    if app.run_review.is_open() {
+        crate::run_review::render(frame, app);
+        return;
+    }
+
     // One match decides scrim and popup, so a scrim never comes without its popup.
     let popup: Option<fn(&mut Frame, &App, Rect)> = match app.mode {
         Mode::List => Some(render_comments_list),
