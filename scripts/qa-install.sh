@@ -6,16 +6,14 @@ set -euo pipefail
 NEW="target/release/herdr-reviewr"
 MANIFEST="herdr-plugin.toml"
 
-# Locate the managed plugin install. Exactly one is expected.
-shopt -s nullglob
-roots=("$HOME"/.config/herdr/plugins/github/persiyanov.reviewr-*)
-shopt -u nullglob
-[ ${#roots[@]} -eq 1 ] || {
-  echo "qa-install: expected one installed plugin, found ${#roots[@]}:" >&2
-  printf '  %s\n' "${roots[@]:-none}" >&2
-  exit 1
-}
-ROOT="${roots[0]}"
+ROOT=$(herdr plugin list --json | python3 -c '
+import json, sys
+plugins = [p for p in json.load(sys.stdin)["result"]["plugins"]
+           if p["plugin_id"] == "persiyanov.reviewr"]
+if len(plugins) != 1 or plugins[0].get("source", {}).get("kind") != "github":
+    sys.exit("qa-install: expected one GitHub-installed persiyanov.reviewr plugin")
+print(plugins[0]["plugin_root"])
+')
 BIN="$ROOT/bin/herdr-reviewr"
 
 # herdr rereads the installed manifest on every plugin call, so it is renamed into place and
@@ -39,7 +37,7 @@ fi
 # A manifest asking for a newer herdr than the running one disables the whole plugin, so refuse
 # before touching anything.
 need=$(sed -n 's/^min_herdr_version = "\(.*\)"/\1/p' "$MANIFEST")
-have=$(herdr --version 2>/dev/null | awk '{print $2}') || have=""
+have=$(herdr api snapshot 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["snapshot"]["version"])') || have=""
 if [ -z "$have" ] || [ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" != "$need" ]; then
   echo "qa-install: this build's manifest needs herdr $need, found '${have:-none}'. Upgrade herdr first." >&2
   exit 1
