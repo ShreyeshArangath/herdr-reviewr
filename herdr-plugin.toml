@@ -7,8 +7,7 @@ min_herdr_version = "0.9.3"
 platforms = ["macos", "linux", "windows"]
 description = "Review agent-written diffs beside the chat and add line comments to the agent input."
 
-# Install downloads this platform's binary from the release into bin/; `plugin link` skips it.
-# Windows runs the PowerShell twin, since `bash` there can be WSL's, which would fetch Linux's.
+# macOS and Linux build this fork from source; Windows uses the upstream release.
 [[build]]
 platforms = ["macos", "linux"]
 command = ["bash", "herdr/install.sh"]

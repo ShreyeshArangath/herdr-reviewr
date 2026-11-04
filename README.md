@@ -74,8 +74,12 @@ win. The initial base remains changeable with `B`; existing `--base` stays pinne
 
 ## Install
 
+This fork's Send and run workflow builds from source on macOS and Linux.
+Install Rust through rustup so the pinned toolchain is available. Windows still
+installs the upstream release and does not include the fork's changes.
+
 ```bash
-herdr plugin install persiyanov/herdr-reviewr
+herdr plugin install ShreyeshArangath/herdr-reviewr --ref shrey/send-and-run
 ```
 
 reviewr opens on its own when herdr creates a workspace for a worktree. To open it yourself:
@@ -87,7 +91,7 @@ herdr plugin action invoke open --plugin persiyanov.reviewr
 **To update**, reinstall. Your config stays:
 
 ```bash
-herdr plugin uninstall persiyanov.reviewr && herdr plugin install persiyanov/herdr-reviewr
+herdr plugin install ShreyeshArangath/herdr-reviewr --ref shrey/send-and-run
 ```
 
 **Without herdr**, run a [release binary](https://github.com/persiyanov/herdr-reviewr/releases/latest)
