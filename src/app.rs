@@ -786,6 +786,7 @@ pub struct App {
     pub worktree_picker: Option<WorktreePicker>,
     pub mode: Mode,
     pub input: String,
+    pub(crate) panel_draft_anchor: Option<Comment>,
     /// The comment editor's caret: a char index into `input` (`0..=chars().count()`).
     pub caret: usize,
     pub status: String,
@@ -991,6 +992,7 @@ impl App {
             worktree_picker: None,
             mode: Mode::Normal,
             input: String::new(),
+            panel_draft_anchor: None,
             caret: 0,
             status: String::new(),
             keys_expanded: false,
@@ -1139,6 +1141,7 @@ impl App {
 
     /// Carry the review into a recovered app: comments, and a draft with its frozen diff.
     pub(crate) fn carry_authored_state_from(&mut self, old: &mut Self) {
+        self.panel_draft_anchor = old.panel_draft_anchor.take();
         self.store = std::mem::take(&mut old.store);
         self.run_review = std::mem::take(&mut old.run_review);
         self.list_cursor = old.list_cursor;
@@ -3565,6 +3568,7 @@ impl App {
 
     pub fn start_comment(&mut self) {
         if self.focus == Focus::Diff && self.has_anchorable_selection() {
+            self.panel_draft_anchor = None;
             self.reveal_diff = true; // scroll the anchored line into view before the box opens
             self.input.clear();
             self.caret = 0;
@@ -3942,6 +3946,7 @@ impl App {
 
     /// Leave compose mode, back to the list it came from if comments remain.
     fn leave_compose(&mut self) {
+        self.panel_draft_anchor = None;
         self.input.clear();
         self.caret = 0;
         let resume = std::mem::take(&mut self.resume_list);
@@ -4069,7 +4074,12 @@ impl App {
         self.rendered.index.unit_at(hi).map_or(hi, |u| u.end - 1)
     }
 
-    fn build_comment(&self, text: String) -> Option<Comment> {
+    pub(crate) fn build_comment(&self, text: String) -> Option<Comment> {
+        if let Some(anchor) = &self.panel_draft_anchor {
+            let mut comment = anchor.clone();
+            comment.text = text;
+            return Some(comment);
+        }
         // The open diff's file, never the list selection.
         let file = self.diff_path.clone()?;
         let (side, start, end, lines) = self.selection_anchor()?;
@@ -4085,6 +4095,9 @@ impl App {
         match self.mode {
             Mode::Composing { editing: Some(i) } => self.store.get(i).map(Comment::location),
             Mode::Composing { editing: None } => {
+                if let Some(anchor) = &self.panel_draft_anchor {
+                    return Some(anchor.location());
+                }
                 let file = self.diff_path.clone()?;
                 let (side, start, end, _) = self.selection_anchor()?;
                 // Only `location()` is read here, which ignores `diff_anchored`.

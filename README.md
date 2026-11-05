@@ -78,6 +78,12 @@ This fork's Send and run workflow builds from source on macOS and Linux.
 Install Rust through rustup so the pinned toolchain is available. Windows still
 installs the upstream release and does not include the fork's changes.
 
+When launched inside the herdr-git panel, hiding Git checkpoints queued comments,
+unfinished drafts, scope, base, and revision evidence before the pane closes.
+Reopening restores those notes and retains stale-review and uncertain-delivery
+checks. Checkpoints stay in private local files. Standalone reviewr keeps its
+normal quit behavior.
+
 ```bash
 herdr plugin install ShreyeshArangath/herdr-reviewr --ref shrey/send-and-run
 ```

@@ -22,6 +22,7 @@ pub mod log;
 pub mod markdown;
 pub(crate) mod marks;
 pub mod model;
+mod panel;
 pub mod proc;
 pub(crate) mod rendered;
 pub mod roles;
@@ -75,7 +76,11 @@ pub fn run() -> Result<()> {
     // herdr holds it at most 2s, then the defaults paint (issue #4).
     cfg.plugin_config_dir = config::resolve_config_dir(herdr::plugin_config_dir);
     let initial_config = config::plugin_config(cfg.plugin_config_dir.as_deref());
-    let launch_error = if initial_config.is_ok() && cfg.base.is_none() {
+    let saved = panel::Session::environment()
+        .map(|session| session.load(&repo_root(&cfg)))
+        .transpose()?
+        .flatten();
+    let launch_error = if initial_config.is_ok() && cfg.base.is_none() && saved.is_none() {
         cfg.initial_base
             .as_deref()
             .and_then(|base| git::write_base_pick(&repo_root(&cfg), base).err())
@@ -90,7 +95,7 @@ pub fn run() -> Result<()> {
     let mut screen = Screen::claim();
     // A cosmetic label, stamped on its own thread; identity is the process.
     herdr::label_pane(&app.herdr.ids);
-    let result = review(&mut screen, &mut cfg, &mut app);
+    let result = review(&mut screen, &mut cfg, &mut app, saved);
     screen.release();
     herdr::clear_pane_label(&app.herdr.ids);
     git::end_sessions();
@@ -98,9 +103,25 @@ pub fn run() -> Result<()> {
 }
 
 /// Review until quit, restarting on each switch's pick in the same pane.
-fn review(screen: &mut Screen, cfg: &mut Config, app: &mut App) -> Result<()> {
+fn review(
+    screen: &mut Screen,
+    cfg: &mut Config,
+    app: &mut App,
+    saved: Option<panel::Saved>,
+) -> Result<()> {
     let mut _session = git::lease_session(&app.repo);
+    if let Some(saved) = &saved {
+        app.scope = saved.scope;
+        app.base.clone_from(&saved.base);
+        app.commit_pick.clone_from(&saved.commit_pick);
+    }
     paint_then_load(&mut screen.terminal, app)?;
+    if let Some(saved) = saved {
+        saved.restore(app);
+        if let Some(session) = panel::Session::environment() {
+            session.consumed()?;
+        }
+    }
     // An old command line hears what changed instead of quietly doing something else.
     if let Some(note) = &cfg.removed_flag {
         app.status.clone_from(note);
@@ -1378,6 +1399,9 @@ fn event_loop(
                     Some(event) => event,
                     None => input::read()?,
                 };
+                if panel::checkpoint_event(app, &event) {
+                    continue;
+                }
                 // The reviewer's input reaching a hidden pane shows it; a resize is only the terminal.
                 if !matches!(event, Event::Resize(..)) && app.note_input() {
                     shown_by_input = Some(true);

@@ -1,7 +1,7 @@
 //! The review model: scopes, changed files, and the session's comments, never lost to a refresh.
 
 /// Which set of changes the Changes view shows.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Scope {
     Uncommitted,
     Branch,
@@ -43,7 +43,7 @@ impl Scope {
 }
 
 /// The `commits` pick: the run `oldest..=newest`, full ids, equal for a run of one.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CommitPick {
     pub oldest: String,
     pub newest: String,
@@ -60,7 +60,7 @@ impl CommitPick {
 }
 
 /// Where a comment's diff was read; it renders only while the scope reads that same diff.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Rev {
     Worktree,
     Commit(CommitPick),
@@ -116,14 +116,14 @@ impl ChangedFile {
 }
 
 /// Which side of the diff a comment's lines live on.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Side {
     New,
     Old,
 }
 
 /// A reviewer comment anchored to a run of diff lines, carrying the snippet.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Comment {
     pub file: String,
     pub side: Side,
@@ -154,7 +154,7 @@ impl Comment {
 }
 
 /// The session's comments, each with an id never reused, so a reference never lands on another.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CommentStore {
     items: Vec<Comment>,
     ids: Vec<u64>,

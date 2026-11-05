@@ -17,7 +17,7 @@ use crate::{
     world::DiffEnds,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Revision {
     head: Option<String>,
     scope: Scope,
@@ -56,11 +56,12 @@ struct Preview {
     scroll: u16,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct RunReview {
     pub preferred_agent: Option<String>,
     revisions: HashMap<u64, Revision>,
     pub(crate) draft_revision: Option<Revision>,
+    #[serde(skip)]
     preview: Option<Preview>,
     uncertain: bool,
 }
@@ -297,5 +298,21 @@ mod tests {
         assert!(!app.run_review.is_open());
         assert_eq!(app.store.len(), 1);
         assert!(app.status.contains("delivery uncertain"));
+    }
+
+    #[test]
+    fn a_saved_review_keeps_stale_checks_and_uncertain_delivery() {
+        let (dir, mut app) = fixture();
+        let encoded = serde_json::to_vec(&app.run_review).unwrap();
+        app.run_review = serde_json::from_slice(&encoded).unwrap();
+        app.run_review.validate(&app).unwrap();
+        std::fs::write(dir.path().join("a.rs"), "changed while hidden\n").unwrap();
+        assert!(app.run_review.validate(&app).unwrap_err().to_string().contains("stale"));
+        app.run_review.uncertain = true;
+        let encoded = serde_json::to_vec(&app.run_review).unwrap();
+        app.run_review = serde_json::from_slice(&encoded).unwrap();
+        app.prepare_run_review();
+        assert!(app.status.contains("delivery uncertain"));
+        assert_eq!(app.store.len(), 1);
     }
 }

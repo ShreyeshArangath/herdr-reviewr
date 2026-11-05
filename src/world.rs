@@ -66,7 +66,7 @@ pub struct PickStatus {
 }
 
 /// The ends a changeset was diffed between (`new` `None` for the worktree); a file's diff reads these.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DiffEnds {
     pub old: String,
     pub new: Option<String>,
