@@ -1046,9 +1046,11 @@ fn esc_peels_one_layer_per_press() {
     assert!(app.select_anchor.is_some(), "v starts a selection");
     press(&mut app, &keymap, KeyCode::Esc);
     assert!(app.select_anchor.is_none(), "the first esc clears the selection");
+    assert_eq!(app.focus, Focus::Diff, "clearing selection keeps the read pane focused");
     assert!(app.keys_expanded, "and leaves the expansion open");
     press(&mut app, &keymap, KeyCode::Esc);
     assert!(!app.keys_expanded, "the next esc closes the expansion");
+    assert_eq!(app.focus, Focus::Diff, "closing key hints keeps the read pane focused");
 
     // An armed crossing is the middle rung: esc drops the arm before the expansion.
     app.keys_expanded = true;
@@ -1061,6 +1063,8 @@ fn esc_peels_one_layer_per_press() {
     assert!(app.keys_expanded, "and leaves the expansion open");
     press(&mut app, &keymap, KeyCode::Esc);
     assert!(!app.keys_expanded, "the next esc closes the expansion");
+    press(&mut app, &keymap, KeyCode::Esc);
+    assert_eq!(app.focus, Focus::Files, "the next esc returns to the file tree");
 }
 
 #[test]
@@ -3756,6 +3760,69 @@ fn mouse(app: &mut App, keymap: &Keymap, kind: MouseEventKind) {
     let heights = vec![1usize; app.visible.len()];
     let event = MouseEvent { kind, column: 10, row: 10, modifiers: KeyModifiers::NONE };
     handle_mouse(app, event, area, &heights, keymap, &herdr_reviewr::export::Clipboard).unwrap();
+}
+
+#[test]
+fn enter_and_escape_navigate_between_the_file_tree_and_diff() {
+    for tab in [Tab::Changes, Tab::AllFiles] {
+        let r = edited_repo();
+        let mut app = app_on(&r);
+        enter_tab(&mut app, tab);
+        let keymap = Keymap::default();
+        app.focus = Focus::Files;
+        let path = app.diff_path.clone();
+        let file_cursor = app.file_cursor;
+
+        press(&mut app, &keymap, KeyCode::Enter);
+        assert_eq!(app.focus, Focus::Diff, "Enter focuses the selected file in {tab:?}");
+        press(&mut app, &keymap, KeyCode::Down);
+        let diff_cursor = app.diff_cursor;
+        assert!(diff_cursor > 0, "movement now navigates the file view");
+
+        press(&mut app, &keymap, KeyCode::Esc);
+        assert_eq!(app.focus, Focus::Files, "Esc returns to the tree in {tab:?}");
+        assert_eq!(app.file_cursor, file_cursor);
+        assert_eq!(app.diff_path, path);
+        press(&mut app, &keymap, KeyCode::Enter);
+        assert_eq!(app.focus, Focus::Diff);
+        assert_eq!(app.diff_cursor, diff_cursor, "reopening preserves the read position");
+
+        app.toggle_navigator_hidden();
+        assert!(app.navigator_hidden);
+        press(&mut app, &keymap, KeyCode::Esc);
+        assert_eq!(app.focus, Focus::Files);
+        assert!(!app.navigator_hidden, "Esc reveals the tree when it was hidden");
+    }
+}
+
+#[test]
+fn enter_toggles_a_directory_without_leaving_the_file_tree() {
+    let r = folder_repo();
+    let mut app = app_on(&r);
+    let keymap = Keymap::default();
+    app.focus = Focus::Files;
+    app.file_cursor = app.file_rows.iter().position(|r| r.dir_path() == Some("src")).unwrap();
+    let expanded = app.file_rows.len();
+    let path = app.diff_path.clone();
+
+    press(&mut app, &keymap, KeyCode::Enter);
+    assert!(app.file_rows.len() < expanded, "Enter collapses the directory");
+    assert_eq!(app.focus, Focus::Files);
+    press(&mut app, &keymap, KeyCode::Enter);
+    assert_eq!(app.file_rows.len(), expanded, "Enter expands the directory");
+    assert_eq!(app.focus, Focus::Files);
+    assert_eq!(app.diff_path, path);
+}
+
+#[test]
+fn enter_keeps_an_empty_file_tree_focused() {
+    let r = Repo::init();
+    r.write("a.rs", "unchanged\n");
+    r.commit_all("init");
+    let mut app = app_on(&r);
+    assert!(app.file_rows.is_empty());
+    press(&mut app, &Keymap::default(), KeyCode::Enter);
+    assert_eq!(app.focus, Focus::Files);
 }
 
 #[test]

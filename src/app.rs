@@ -3208,7 +3208,7 @@ impl App {
         self.keys_expanded = !self.keys_expanded;
     }
 
-    /// `esc` peels one layer per press: selection, crossing, then footer expansion.
+    /// `esc` clears selection, crossing, and footer expansion before returning to the tree.
     pub fn escape(&mut self) {
         if self.tab != Tab::Pr {
             if self.select_anchor.is_some() {
@@ -3220,7 +3220,11 @@ impl App {
                 return;
             }
         }
-        self.keys_expanded = false;
+        if self.keys_expanded {
+            self.keys_expanded = false;
+        } else if self.tab.is_file_tab() && self.focus == Focus::Diff {
+            self.toggle_focus();
+        }
     }
 
     /// Whether traversal keys act; a live selection holds the cursor.

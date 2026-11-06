@@ -145,6 +145,8 @@ Every key can be rebound ([Keybindings](#keybindings)).
 | `PageUp` `PageDown` | Page |
 | `Ctrl+U` `Ctrl+D` | Half page |
 | `Tab` | Switch pane |
+| `Enter` | Focus the selected file; toggle a directory |
+| `Esc` | Return to the file tree after closing overlays or clearing selection |
 | `→` `←` | Expand / collapse, or scroll sideways |
 | `/` | Search files and code |
 | `Ctrl+F` | Find in file |

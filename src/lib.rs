@@ -2068,7 +2068,13 @@ fn dispatch_key(app: &mut App, key: KeyEvent, area: Rect, keymap: &Keymap) -> Re
 
     match key.code {
         Tab => app.toggle_focus(),
-        // `esc` peels one layer: selection, armed crossing, footer expansion.
+        Enter if app.focus == Focus::Files && !app.file_rows.is_empty() => {
+            app.select_file(app.file_cursor)?;
+            if !app.on_folder() {
+                app.focus = Focus::Diff;
+            }
+        }
+        // `esc` clears transient state before returning to the file tree.
         Esc => app.escape(),
         _ => {}
     }
